@@ -18,6 +18,7 @@ intel-mkl-src = { workspace = true, optional = true }
 num-traits = { workspace = true }
 rayon = { workspace = true }
 safetensors = { workspace = true }
+saccade-core = { path = "../../saccade-core" }
 serde = { workspace = true }
 objc2-metal = { workspace = true, optional = true }
 candle-metal-kernels = { workspace = true, optional = true }
