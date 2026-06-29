@@ -5,7 +5,7 @@
 //! with a batch dimension (so of shape `(b_sz, in_c)`) or without (of shape `(in_c,)`), the
 //! output has shape `(b_sz, out_c)` and `(out_c,)` respectively.
 
-use candle::{Result, Tensor};
+use candle::{Result, Tensor, DType};
 use std::sync::Arc;
 
 /// Dynamic execution backends supported by the foundational Linear layer
@@ -150,31 +150,32 @@ impl super::Module for Linear {
             LinearBackend::Saccade { op, bias, bypass } => {
                 if *bypass || saccade_core::is_c_tarq_bypassed() {
                     // Bypass Path: execute standard matmul using the pre-reconstructed float weight tensor
+                    let dequantized_w = op.dequantized_weight.to_dtype(x.dtype())?;
                     let y = match *x.dims() {
                         [b1, b2, m, k] => {
                             if x.is_contiguous() {
-                                let w = op.dequantized_weight.t()?;
+                                let w = dequantized_w.t()?;
                                 x.reshape((b1 * b2 * m, k))?
                                     .matmul(&w)?
                                     .reshape((b1, b2, m, ()))?
                             } else {
-                                let w = op.dequantized_weight.broadcast_left((b1, b2))?.t()?;
+                                let w = dequantized_w.broadcast_left((b1, b2))?.t()?;
                                 x.matmul(&w)?
                             }
                         }
                         [bsize, m, k] => {
                             if x.is_contiguous() {
-                                let w = op.dequantized_weight.t()?;
+                                let w = dequantized_w.t()?;
                                 x.reshape((bsize * m, k))?
                                     .matmul(&w)?
                                     .reshape((bsize, m, ()))?
                             } else {
-                                let w = op.dequantized_weight.broadcast_left(bsize)?.t()?;
+                                let w = dequantized_w.broadcast_left(bsize)?.t()?;
                                 x.matmul(&w)?
                             }
                         }
                         _ => {
-                            let w = op.dequantized_weight.t()?;
+                            let w = dequantized_w.t()?;
                             x.matmul(&w)?
                         }
                     };
@@ -250,14 +251,14 @@ fn find_thresholds(vb: &crate::VarBuilder) -> (f32, f32) {
 /// This uses some default names for weights and biases, namely `"weight"` and `"bias"`.
 pub fn linear(in_dim: usize, out_dim: usize, vb: crate::VarBuilder) -> Result<Linear> {
     if vb.contains_tensor("saccade_packed_base") {
-        let packed_base = vb.get((out_dim, in_dim / 8), "saccade_packed_base")?;
-        let scale_base = vb.get((out_dim,), "saccade_scale_base")?;
+        let packed_base = vb.get_with_hints_dtype((out_dim, in_dim / 8), "saccade_packed_base", Default::default(), DType::U32)?;
+        let scale_base = vb.get_with_hints_dtype((out_dim,), "saccade_scale_base", Default::default(), DType::F16)?;
         
         let sparse_delta = if vb.contains_tensor("saccade_delta_row_ptrs") {
-            let row_ptrs = vb.get_unchecked("saccade_delta_row_ptrs")?;
-            let col_indices = vb.get_unchecked("saccade_delta_col_indices")?;
-            let values = vb.get_unchecked("saccade_delta_values")?;
-            let scale = vb.get_unchecked("saccade_delta_scale")?;
+            let row_ptrs = vb.get_unchecked_dtype("saccade_delta_row_ptrs", DType::U32)?;
+            let col_indices = vb.get_unchecked_dtype("saccade_delta_col_indices", DType::U32)?;
+            let values = vb.get_unchecked_dtype("saccade_delta_values", DType::U8)?;
+            let scale = vb.get_unchecked_dtype("saccade_delta_scale", DType::F16)?;
             Some(saccade_core::config::SparseDeltaMatrix {
                 row_ptrs,
                 col_indices,
@@ -299,14 +300,14 @@ pub fn linear(in_dim: usize, out_dim: usize, vb: crate::VarBuilder) -> Result<Li
 /// Create or initialize a new linear layer without biases.
 pub fn linear_no_bias(in_dim: usize, out_dim: usize, vb: crate::VarBuilder) -> Result<Linear> {
     if vb.contains_tensor("saccade_packed_base") {
-        let packed_base = vb.get((out_dim, in_dim / 8), "saccade_packed_base")?;
-        let scale_base = vb.get((out_dim,), "saccade_scale_base")?;
+        let packed_base = vb.get_with_hints_dtype((out_dim, in_dim / 8), "saccade_packed_base", Default::default(), DType::U32)?;
+        let scale_base = vb.get_with_hints_dtype((out_dim,), "saccade_scale_base", Default::default(), DType::F16)?;
         
         let sparse_delta = if vb.contains_tensor("saccade_delta_row_ptrs") {
-            let row_ptrs = vb.get_unchecked("saccade_delta_row_ptrs")?;
-            let col_indices = vb.get_unchecked("saccade_delta_col_indices")?;
-            let values = vb.get_unchecked("saccade_delta_values")?;
-            let scale = vb.get_unchecked("saccade_delta_scale")?;
+            let row_ptrs = vb.get_unchecked_dtype("saccade_delta_row_ptrs", DType::U32)?;
+            let col_indices = vb.get_unchecked_dtype("saccade_delta_col_indices", DType::U32)?;
+            let values = vb.get_unchecked_dtype("saccade_delta_values", DType::U8)?;
+            let scale = vb.get_unchecked_dtype("saccade_delta_scale", DType::F16)?;
             Some(saccade_core::config::SparseDeltaMatrix {
                 row_ptrs,
                 col_indices,
