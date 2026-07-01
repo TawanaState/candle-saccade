@@ -149,6 +149,7 @@ impl super::Module for Linear {
             }
             LinearBackend::Saccade { op, bias, bypass } => {
                 if *bypass || saccade_core::is_c_tarq_bypassed() {
+                    let start_time = std::time::Instant::now();
                     // Bypass Path: execute standard matmul using the pre-reconstructed float weight tensor
                     let dequantized_w = op.dequantized_weight.to_dtype(x.dtype())?;
                     let y = match *x.dims() {
@@ -179,6 +180,9 @@ impl super::Module for Linear {
                             x.matmul(&w)?
                         }
                     };
+
+                    let elapsed = start_time.elapsed().as_nanos() as u64;
+                    saccade_core::telemetry::TELEMETRY.total_elapsed_ns.fetch_add(elapsed, std::sync::atomic::Ordering::Relaxed);
 
                     // Record bypass telemetry
                     saccade_core::telemetry::log_bypass_decision(op.in_features, op.out_features);
